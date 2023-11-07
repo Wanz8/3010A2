@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ecks</title>
+</head>
+<body>
+    <div id="login-page">
+        <input type="text" id="username" placeholder="Enter Your Username">
+        <button onclick="login()">Login</button>
+    </div>
+    <div id="main-page" style="display:none;">
+        <h2>Ecks:</h2>
+        <button onclick="logout()" id="logout-btn" style="display:none;">Logout</button>
+        <h3>New Post:</h3>
+        <input type="text" id="tweet" placeholder="Anything you want to post？">
+        <button onclick="postTweet()">Send</button>
+        <ul id="tweets"></ul> <!-- 将tweets容器改为列表以更好地控制结构 -->
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
