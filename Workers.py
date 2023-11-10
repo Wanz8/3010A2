@@ -10,6 +10,7 @@ tweets = {}
 tweet_locks = {}
 TIMEOUT_VALUE = 60  # in seconds
 
+
 def handle_request(coordinator_socket):
     ready_to_read, _, _ = select.select([coordinator_socket], [], [], TIMEOUT_VALUE)
     if ready_to_read:
@@ -19,12 +20,14 @@ def handle_request(coordinator_socket):
             print(f"Raw data received: {raw_data}")
         else:
             print("No data received from coordinator.")
+            return  # Exit the function if no data is received
     else:
         print("No data available to read from coordinator.")
+        return
     try:
-        request_data = coordinator_socket.recv(1024).decode()
-        request = json.loads(request_data)
-
+        # request_data = coordinator_socket.recv(1024).decode()
+        #request = json.loads(request)
+        print(request)
         # Iterate through locked tweets for timeout checks
         current_time = datetime.now().timestamp()
         for tweet_id, lock in list(tweet_locks.items()):
@@ -38,14 +41,19 @@ def handle_request(coordinator_socket):
 
         # Handle SET requests (first phase of 2PC)
         elif request['type'] == 'SET':
+            print("wssb")
             if 'key' in request and 'value' in request:
                 tweet_id = request['key']
                 tweet_data = request['value']
+                print(tweet_id)
+                print(tweet_data)
                 if tweet_id not in tweet_locks:
+                    print("timeout hahaahahahahah")
                     tweet_locks[tweet_id] = {'data': tweet_data, 'timeout': datetime.now().timestamp() + 30}
                     coordinator_socket.sendall(b'ACK')
+                    print(tweet_locks)
             else:
-                print(request_data)
+                #print(request_data)
                 print("Invalid SET request format")
 
         # Handle PUT and DELETE requests (also part of the first phase of 2PC)

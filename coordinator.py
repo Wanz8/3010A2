@@ -2,15 +2,12 @@ import json
 import select
 import socket
 import threading
-from abc import ABC, abstractmethod
 import time
 
 # Global variables
 ALL_WORKERS_REQUEST = {}
-ALL_FINISH_REQUEST = []
 ALL_TRANSACTION = []
 WORKER_INDEX = 0
-
 
 class Worker:
     def __init__(self, host, port):
@@ -27,14 +24,13 @@ class Worker:
             return True
         except socket.error:
             print(f"Fail to connect to worker {self.host}:{self.port}")
-            self.worker_socket = None;
+            self.worker_socket = None
             return False
 
     def get_worker_socket(self):
         return self.worker_socket
 
-
-class TransactionRequest(ABC):
+class TransactionRequest:
     def __init__(self, web_server_socket, request, timeout):
         self.web_server_socket = web_server_socket
         self.request = request
@@ -43,18 +39,12 @@ class TransactionRequest(ABC):
         self.state = 'init'
         self.fail = False
 
-    def __str__(self):
-        return json.dumps(self.request)
-
-    @abstractmethod
     def send_to_worker(self, worker_socket):
         pass
 
-    @abstractmethod
     def receive_from_worker(self, worker_socket):
         pass
 
-    @abstractmethod
     def complete_transaction(self):
         pass
 
@@ -89,14 +79,19 @@ class Get(TransactionRequest):
             self.state = 'waiting'
 
     def receive_from_worker(self, worker_socket):
-        # Receive the response from the worker
-        response = worker_socket.recv(1024).decode()
-        if not response:
-            self.set_request_fail()
-            self.state = 'failed'
+        if self.state in ['waiting', 'committing']:
+            ready_to_read, _, _ = select.select([worker_socket], [], [], self.timeout)
+            if ready_to_read:
+                response = worker_socket.recv(1024).decode()
+                if not response:
+                    self.set_request_fail()
+                    self.state = 'failed'
+                else:
+                    self.request['response'] = response
+                    self.state = 'received'
         else:
-            self.request['response'] = response
-            self.state = 'received'
+            print(self.state)
+            print("No data available from worker.")
 
     def complete_transaction(self):
         # Send the response back to the web server
@@ -136,16 +131,20 @@ class TwoPhaseCommit(TransactionRequest):
             self.state = 'failed'
 
     def receive_from_worker(self, worker_socket):
+        print("nsssb")
+        print(self.state)
         if self.state in ['waiting', 'committing']:
             ready_to_read, _, _ = select.select([worker_socket], [], [], self.timeout)
             if ready_to_read:
                 response = worker_socket.recv(1024).decode()
                 # Check if any response is received
+                print(response)
                 if response:
                     if response == 'ACK':
                         self.commit_count += 1
                         if self.commit_count == self.total_workers:
                             self.state = 'committed'
+                            print("我commit了")
                     else:
                         self.set_request_fail()
                         self.state = 'failed'
@@ -202,7 +201,7 @@ def handle_request_from_web_server(web_server_socket):
 
 
 workers = []
-for i in range(6):
+for i in range(3):  # Adjust based on your number of workers
     worker = Worker('localhost', 8000 + i)
     if worker.connect():
         workers.append(worker)
