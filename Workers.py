@@ -52,6 +52,7 @@ def handle_request(coordinator_socket):
                     tweet_locks[tweet_id] = {'data': tweet_data, 'timeout': datetime.now().timestamp() + 30}
                     coordinator_socket.sendall(b'ACK')
                     print(tweet_locks)
+                    coordinator_socket.send(json.dumps(request).encode())
             else:
                 #print(request_data)
                 print("Invalid SET request format")
@@ -63,18 +64,27 @@ def handle_request(coordinator_socket):
                 if tweet_id not in tweet_locks:
                     tweet_locks[tweet_id] = {'timeout': current_time + 30}
                     coordinator_socket.sendall(b'ACK')
+
             else:
                 print("Invalid PUT/DELETE request format")
 
         # Handle COMMIT requests (second phase of 2PC)
         elif request['type'] == 'COMMIT':
-            for tweet_id, lock in tweet_locks.items():
+            print("Im in commit")
+            # Create a list of items to iterate over
+            items_to_commit = list(tweet_locks.items())
+            print("Tweet locks items:", items_to_commit)
+            for tweet_id, lock in items_to_commit:
+                print("Tweet locks items: ", items_to_commit)
                 if 'data' in lock:
+                    print("Im in lock")
                     tweets[tweet_id] = lock['data']
                 else:
+                    print("Im not in lock")
                     tweets.pop(tweet_id, None)
             tweet_locks.clear()
             coordinator_socket.sendall(b'Commit complete')
+            print(tweets)
 
 
     except json.JSONDecodeError as e:

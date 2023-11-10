@@ -9,6 +9,7 @@ ALL_WORKERS_REQUEST = {}
 ALL_TRANSACTION = []
 WORKER_INDEX = 0
 
+
 class Worker:
     def __init__(self, host, port):
         self.host = host
@@ -29,6 +30,7 @@ class Worker:
 
     def get_worker_socket(self):
         return self.worker_socket
+
 
 class TransactionRequest:
     def __init__(self, web_server_socket, request, timeout):
@@ -93,10 +95,10 @@ class Get(TransactionRequest):
             print(self.state)
             print("No data available from worker.")
 
-    def complete_transaction(self):
-        # Send the response back to the web server
-        response = self.request.get('response', 'No data')
-        self.web_server_socket.sendall(response.encode())
+    # def complete_transaction(self):
+    #     # Send the response back to the web server
+    #     response = self.request.get('response', 'No data')
+    #     self.web_server_socket.sendall(response.encode())
 
 
 def select_worker():
@@ -114,6 +116,8 @@ class TwoPhaseCommit(TransactionRequest):
         super().__init__(web_server_socket, request, timeout)
         self.total_workers = total_workers
         self.commit_count = 0
+        self.data = request.get('data')  # Store the data for later use
+        print("Transaction initialization with data:", self.data)
 
     def send_to_worker(self, worker_socket):
         try:
@@ -142,9 +146,10 @@ class TwoPhaseCommit(TransactionRequest):
                 if response:
                     if response == 'ACK':
                         self.commit_count += 1
-                        if self.commit_count == self.total_workers:
-                            self.state = 'committed'
-                            print("我commit了")
+                        # if self.commit_count == self.total_workers:
+                        self.state = 'committed'
+                        print("From receive from worker", self.data)
+                        print("我commit了")
                     else:
                         self.set_request_fail()
                         self.state = 'failed'
@@ -158,8 +163,27 @@ class TwoPhaseCommit(TransactionRequest):
                 self.state = 'failed'
 
     def complete_transaction(self):
-        # Send the response to the web server
-        response = 'Commit successful' if self.state == 'committed' else 'Commit failed'
+        if self.state == 'committed':
+            # Check if 'data' key exists in the request
+            print(self.request)
+            self.data = self.request.get('value')
+            print(self.data)
+            if self.data:
+                # Logic to instruct workers to save the tweet
+                for worker in workers:
+                    worker_socket = worker.get_worker_socket()
+                    if worker_socket:
+                        try:
+                            worker_socket.sendall(json.dumps({'type': 'COMMIT', 'data': self.data}).encode())
+                        except BrokenPipeError as e:
+                            print(f"Error sending save request to worker: {e}")
+                response = 'Commit successful'
+            else:
+                print("No data found to save-From complete_transaction")
+                response = 'Commit failed - No data to save'
+        else:
+            response = 'Commit failed'
+
         self.web_server_socket.sendall(response.encode())
 
 
@@ -176,8 +200,8 @@ def handle_request_from_web_server(web_server_socket):
             if request['type'] == 'GET':
                 transaction = Get(web_server_socket, request, timeout=30)
             elif request['type'] in ['SET', 'PUT', 'DELETE']:
-                transaction = TwoPhaseCommit(web_server_socket, request, timeout=30,
-                                             total_workers=len(ALL_WORKERS_REQUEST))
+                transaction = TwoPhaseCommit(web_server_socket, request, timeout=30, total_workers=len(workers))
+                print("Under SET,PUT,DELETE", request['value'])
 
             # 将事务添加到活动事务列表
             ALL_TRANSACTION.append(transaction)
