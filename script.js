@@ -9,7 +9,7 @@ function login() {
     var username = document.getElementById('username').value;
     if (!username) {
         alert("Please enter a username.");
-        return false; // Prevent form submission
+        return false;
     }
 
     var xhr = new XMLHttpRequest();
@@ -18,40 +18,27 @@ function login() {
     xhr.onload = function() {
         var response = JSON.parse(this.responseText);
         if (response.status === "Logged in!") {
-            // 设置cookie
+
             setCookie("username", username, 1); // Set cookie when logged in
 
-            // 隐藏登录页面，显示主页面
+
             document.getElementById('login-page').style.display = 'none';
             document.getElementById('main-page').style.display = 'block';
-
-            // 显示注销按钮
             document.getElementById('logout-btn').style.display = 'block';
 
-            // 获取并显示推文
             getTweets();
         } else {
-            // 处理登录失败的情况
             alert("Login failed: " + response.status);
         }
     };
 
     var data = { username: username };
     xhr.send(JSON.stringify(data));
-    return false; // 防止表单提交
+    return false;
 }
 
 var username;
 
-function getParameterByName(name, url) {
-    if (!url) url = window.location.href;
-    name = name.replace(/[\[\]]/g, "\\$&");
-    var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
-        results = regex.exec(url);
-    if (!results) return null;
-    if (!results[2]) return '';
-    return decodeURIComponent(results[2].replace(/\+/g, " "));
-}
 
 
 function getTweets() {
@@ -80,7 +67,7 @@ function postTweet() {
     xhr.setRequestHeader('Content-type', 'application/json');
     xhr.onload = function() {
         if (this.status == 201) {
-            getTweets(); // 重新加载推文
+            getTweets();
         }
     }
     var data = {
@@ -120,13 +107,11 @@ function deleteTweet(tweetId) {
 }
 
 function logout() {
-    // 添加注销的XHR请求
     var xhr = new XMLHttpRequest();
     xhr.open('DELETE', '/api/login', true);
     xhr.onload = function() {
         if (this.status == 200) {
-            // 注销成功，清除页面内容，并显示登录界面
-            setCookie("username", "", -1); // 清除cookie
+            setCookie("username", "", -1);
             document.getElementById('main-page').style.display = 'none';
             document.getElementById('login-page').style.display = 'block';
             document.getElementById('logout-btn').style.display = 'block';
@@ -146,13 +131,11 @@ function getCookie(name) {
 window.onload = function() {
     username = getCookie('username');
     if (username) {
-        // 用户已经登录，显示主页面和注销按钮
         document.getElementById('login-page').style.display = 'none';
         document.getElementById('main-page').style.display = 'block';
         document.getElementById('logout-btn').style.display = 'block';
         getTweets();
     } else {
-        // 用户未登录，显示登录页面并隐藏主页面和注销按钮
         document.getElementById('login-page').style.display = 'block';
         document.getElementById('main-page').style.display = 'none';
         document.getElementById('logout-btn').style.display = 'none';

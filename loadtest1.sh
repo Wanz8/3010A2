@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Change this!
-PORT=8410
+PORT=8080
 
 for item in `seq 1 30`
 do
