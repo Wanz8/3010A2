@@ -4,7 +4,7 @@ import json
 
 HOST, PORT = '127.0.0.1', 8080
 DB_SERVER_HOST, DB_SERVER_PORT = '127.0.0.1', 7999
-#coordinator_host, coordinator_port = 'localhost', 8411
+# coordinator_host, coordinator_port = 'localhost', 8411
 tweet_id = 0
 
 
@@ -12,47 +12,22 @@ def check_logged_in(headers):
     for header in headers:
         if header.startswith('Cookie:'):
             try:
-                # 假设 Cookie 的格式是 'Cookie: username=some_username', '', ''
                 parts = header.split('Cookie: ')[1].split(';')
                 cookies_dict = {part.split('=')[0]: part.split('=')[1] for part in parts if part}
-                # 检查 username 是否存在且不为空
                 if cookies_dict.get('username'):
                     return True
             except IndexError:
-                # 如果出现解析错误，则返回 False
                 return False
     return False
 
 
-# def send_request_to_coordinator(request_data):
-#     # Define and establish a connection to the coordinator
-#     coordinator_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#     coordinator_host = 'localhost'
-#     coordinator_port = 8411
-#     coordinator_socket.connect((coordinator_host, coordinator_port))
-#
-#     # Send the request
-#     coordinator_socket.sendall(json.dumps(request_data).encode())
-#
-#     # Receive and process the response
-#     response = coordinator_socket.recv(1024)
-#     coordinator_socket.close()
-#
-#     if not response:
-#         print("No response received from coordinator.")
-#         return None
-#
-#     try:
-#         return json.loads(response.decode('utf-8'))
-#     except json.JSONDecodeError as e:
-#         print(f"Error decoding JSON response: {e}")
-#         return None
 def send_request_to_db_server(request):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((DB_SERVER_HOST, DB_SERVER_PORT))
         s.sendall(json.dumps(request).encode())
         response = s.recv(1024)
         return json.loads(response.decode('utf-8'))
+
 
 def handle_client(client_socket):
     global tweet_id
@@ -78,7 +53,6 @@ def handle_client(client_socket):
                 status_line = "HTTP/1.1 200 OK"
             response = f"{status_line}\nContent-Type: text/html\n\n{content}"
             client_socket.sendall(response.encode())
-    # Add authentication check for tweet API
     elif method in ["GET", "POST"] and path.startswith("/api/tweet"):
         if not check_logged_in(headers):
             response = "HTTP/1.1 401 Unauthorized\nContent-Type: text/html\n\n<h1>401 - Unauthorized</h1>"
@@ -90,24 +64,24 @@ def handle_client(client_socket):
                 if response_data is not None:
                     all_tweets = response_data.get("value", {})
                 else:
-                    all_tweets = {}  # or handle the error as appropriate
+                    all_tweets = {}  # If no response from DB server, return empty dictionary
                 response = f"HTTP/1.1 200 OK\nContent-Type: application/json\n\n{json.dumps(all_tweets)}"
                 client_socket.sendall(response.encode())
             # If POST request on /api/tweet
             elif method == "POST":
                 body = headers[-1]
                 tweet = json.loads(body)
-                tweet['id'] = tweet_id  # assign an ID to the tweet
+                tweet['id'] = tweet_id
                 send_request_to_db_server({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
-                tweet_id += 1  # increment the tweet ID counter
+                tweet_id += 1
                 response = f"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet created!'})}"
                 client_socket.sendall(response.encode())
     elif method == "POST" and path.startswith("/api/tweet"):
         body = headers[-1]
         tweet = json.loads(body)
-        tweet['id'] = tweet_id  # assign an ID to the tweet
+        tweet['id'] = tweet_id
         send_request_to_db_server({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
-        tweet_id += 1  # increment the tweet ID counter
+        tweet_id += 1
         # print(headers)
         response = f"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet created!'})}"
         client_socket.sendall(response.encode())

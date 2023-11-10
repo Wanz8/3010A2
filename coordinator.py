@@ -4,7 +4,6 @@ import socket
 import threading
 import time
 
-# Global variables
 ALL_WORKERS_REQUEST = {}
 ALL_TRANSACTION = []
 WORKER_INDEX = 0
@@ -32,7 +31,7 @@ class Worker:
         return self.worker_socket
 
 
-class TransactionRequest:
+class Handle_Request:
     def __init__(self, web_server_socket, request, timeout):
         self.web_server_socket = web_server_socket
         self.request = request
@@ -41,35 +40,17 @@ class TransactionRequest:
         self.state = 'init'
         self.fail = False
 
-    def send_to_worker(self, worker_socket):
-        pass
-
-    def receive_from_worker(self, worker_socket):
-        pass
-
     def complete_transaction(self):
         pass
 
-    def get_web_server_socket(self):
-        return self.web_server_socket
-
     def set_request_fail(self):
         self.fail = True
-
-    def is_request_fail(self):
-        return self.fail
-
-    def get_state(self):
-        return self.state
-
-    def is_timed_out(self):
-        return (time.time() - self.start_time) >= self.timeout
 
     def __str__(self):
         return str(self.request)
 
 
-class Get(TransactionRequest):
+class Get(Handle_Request):
     def send_to_worker(self, worker_socket):
         if worker_socket is None:
             self.set_request_fail()
@@ -95,10 +76,13 @@ class Get(TransactionRequest):
             print(self.state)
             print("No data available from worker.")
 
-    # def complete_transaction(self):
-    #     # Send the response back to the web server
-    #     response = self.request.get('response', 'No data')
-    #     self.web_server_socket.sendall(response.encode())
+    def complete_transaction(self):
+        if self.state == 'received':
+            response = self.request['response']
+            self.web_server_socket.sendall(json.dumps(response).encode())
+        else:
+            response = 'Get failed'
+            self.web_server_socket.sendall(json.dumps(response).encode())
 
 
 def select_worker():
@@ -111,7 +95,7 @@ def select_worker():
     return None
 
 
-class TwoPhaseCommit(TransactionRequest):
+class twoPhaseCommit(Handle_Request):
     def __init__(self, web_server_socket, request, timeout, total_workers):
         super().__init__(web_server_socket, request, timeout)
         self.total_workers = total_workers
@@ -135,7 +119,7 @@ class TwoPhaseCommit(TransactionRequest):
             self.state = 'failed'
 
     def receive_from_worker(self, worker_socket):
-        print("nsssb")
+        #print("nsssb")
         print(self.state)
         if self.state in ['waiting', 'committing']:
             ready_to_read, _, _ = select.select([worker_socket], [], [], self.timeout)
@@ -148,8 +132,7 @@ class TwoPhaseCommit(TransactionRequest):
                         self.commit_count += 1
                         # if self.commit_count == self.total_workers:
                         self.state = 'committed'
-                        print("From receive from worker", self.data)
-                        print("我commit了")
+                        print("I already committed")
                     else:
                         self.set_request_fail()
                         self.state = 'failed'
@@ -181,10 +164,11 @@ class TwoPhaseCommit(TransactionRequest):
             else:
                 print("No data found to save-From complete_transaction")
                 response = 'Commit failed - No data to save'
+
         else:
             response = 'Commit failed'
 
-        self.web_server_socket.sendall(response.encode())
+        self.web_server_socket.sendall(json.dumps(response).encode())
 
 
 def handle_request_from_web_server(web_server_socket):
@@ -196,27 +180,22 @@ def handle_request_from_web_server(web_server_socket):
         try:
             request = json.loads(request_data)
 
-            # 根据请求类型创建相应的事务对象
             if request['type'] == 'GET':
                 transaction = Get(web_server_socket, request, timeout=30)
             elif request['type'] in ['SET', 'PUT', 'DELETE']:
-                transaction = TwoPhaseCommit(web_server_socket, request, timeout=30, total_workers=len(workers))
+                transaction = twoPhaseCommit(web_server_socket, request, timeout=30, total_workers=len(workers))
                 print("Under SET,PUT,DELETE", request['value'])
 
-            # 将事务添加到活动事务列表
             ALL_TRANSACTION.append(transaction)
 
-            # 选择一个工作器并发送请求
             worker_socket = select_worker()
             transaction.send_to_worker(worker_socket)
 
-            # 将请求添加到全局请求字典
             ALL_WORKERS_REQUEST[worker_socket] = transaction
 
-            # 等待并处理工作器的响应
             transaction.receive_from_worker(worker_socket)
 
-            # 完成事务，将结果发送回 webServer.py
+            # Commit the transaction if it is ready
             transaction.complete_transaction()
 
         except json.JSONDecodeError as e:
@@ -225,7 +204,7 @@ def handle_request_from_web_server(web_server_socket):
 
 
 workers = []
-for i in range(3):  # Adjust based on your number of workers
+for i in range(3):
     worker = Worker('localhost', 8000 + i)
     if worker.connect():
         workers.append(worker)
@@ -234,9 +213,8 @@ for i in range(3):  # Adjust based on your number of workers
 
 
 def main():
-    # 假设协调器监听本地主机的某个端口
     host = 'localhost'
-    port = 8411  # 示例端口号
+    port = 8411
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((host, port))
@@ -247,7 +225,6 @@ def main():
         while True:
             web_server_socket, addr = server_socket.accept()
             print(f"Connected to web server: {addr}")
-            # 启动一个新线程来处理来自web服务器的请求
             threading.Thread(target=handle_request_from_web_server, args=(web_server_socket,)).start()
 
 

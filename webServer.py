@@ -25,28 +25,21 @@ def check_logged_in(headers):
 
 
 def send_request_to_coordinator(request_data):
-    # Define and establish a connection to the coordinator
-    coordinator_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    coordinator_host = 'localhost'
-    coordinator_port = 8411
-    coordinator_socket.connect((coordinator_host, coordinator_port))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as coordinator_socket:
+        coordinator_socket.connect((coordinator_host, coordinator_port))
+        coordinator_socket.sendall(json.dumps(request_data).encode())
+        response = coordinator_socket.recv(1024)
 
-    # Send the request
-    coordinator_socket.sendall(json.dumps(request_data).encode())
+        if not response:
+            print("No response received from coordinator.")
+            return None
 
-    # Receive and process the response
-    response = coordinator_socket.recv(1024)
-    coordinator_socket.close()
-
-    if not response:
-        print("No response received from coordinator.")
-        return None
-
-    try:
-        return json.loads(response.decode('utf-8'))
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON response: {e}")
-        return None
+        try:
+            response_data = json.loads(response.decode('utf-8'))
+            return response_data
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON response: {e}")
+            return None
 
 
 def handle_client(client_socket):
@@ -79,16 +72,14 @@ def handle_client(client_socket):
             response = "HTTP/1.1 401 Unauthorized\nContent-Type: text/html\n\n<h1>401 - Unauthorized</h1>"
             client_socket.sendall(response.encode())
         else:
-            # If GET request on /api/tweet
             if method == "GET":
                 response_data = send_request_to_coordinator({"type": "GET", "key": "tweets"})
-                if response_data is not None:
+                if isinstance(response_data, dict):
                     all_tweets = response_data.get("value", {})
                 else:
-                    all_tweets = {}  # or handle the error as appropriate
+                    all_tweets = {}  # Handle case where response_data is not a dictionary
                 response = f"HTTP/1.1 200 OK\nContent-Type: application/json\n\n{json.dumps(all_tweets)}"
                 client_socket.sendall(response.encode())
-            # If POST request on /api/tweet
             elif method == "POST":
                 body = headers[-1]
                 tweet = json.loads(body)
