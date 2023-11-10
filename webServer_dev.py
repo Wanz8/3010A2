@@ -3,8 +3,8 @@ import threading
 import json
 
 HOST, PORT = '127.0.0.1', 8080
-#DB_SERVER_HOST, DB_SERVER_PORT = '127.0.0.1', 7999
-coordinator_host, coordinator_port = 'localhost', 8411
+DB_SERVER_HOST, DB_SERVER_PORT = '127.0.0.1', 7999
+#coordinator_host, coordinator_port = 'localhost', 8411
 tweet_id = 0
 
 
@@ -24,30 +24,35 @@ def check_logged_in(headers):
     return False
 
 
-def send_request_to_coordinator(request_data):
-    # Define and establish a connection to the coordinator
-    coordinator_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    coordinator_host = 'localhost'
-    coordinator_port = 8411
-    coordinator_socket.connect((coordinator_host, coordinator_port))
-
-    # Send the request
-    coordinator_socket.sendall(json.dumps(request_data).encode())
-
-    # Receive and process the response
-    response = coordinator_socket.recv(1024)
-    coordinator_socket.close()
-
-    if not response:
-        print("No response received from coordinator.")
-        return None
-
-    try:
+# def send_request_to_coordinator(request_data):
+#     # Define and establish a connection to the coordinator
+#     coordinator_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#     coordinator_host = 'localhost'
+#     coordinator_port = 8411
+#     coordinator_socket.connect((coordinator_host, coordinator_port))
+#
+#     # Send the request
+#     coordinator_socket.sendall(json.dumps(request_data).encode())
+#
+#     # Receive and process the response
+#     response = coordinator_socket.recv(1024)
+#     coordinator_socket.close()
+#
+#     if not response:
+#         print("No response received from coordinator.")
+#         return None
+#
+#     try:
+#         return json.loads(response.decode('utf-8'))
+#     except json.JSONDecodeError as e:
+#         print(f"Error decoding JSON response: {e}")
+#         return None
+def send_request_to_db_server(request):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((DB_SERVER_HOST, DB_SERVER_PORT))
+        s.sendall(json.dumps(request).encode())
+        response = s.recv(1024)
         return json.loads(response.decode('utf-8'))
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON response: {e}")
-        return None
-
 
 def handle_client(client_socket):
     global tweet_id
@@ -81,7 +86,7 @@ def handle_client(client_socket):
         else:
             # If GET request on /api/tweet
             if method == "GET":
-                response_data = send_request_to_coordinator({"type": "GET", "key": "tweets"})
+                response_data = send_request_to_db_server({"type": "GET", "key": "tweets"})
                 if response_data is not None:
                     all_tweets = response_data.get("value", {})
                 else:
@@ -93,7 +98,7 @@ def handle_client(client_socket):
                 body = headers[-1]
                 tweet = json.loads(body)
                 tweet['id'] = tweet_id  # assign an ID to the tweet
-                send_request_to_coordinator({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
+                send_request_to_db_server({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
                 tweet_id += 1  # increment the tweet ID counter
                 response = f"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet created!'})}"
                 client_socket.sendall(response.encode())
@@ -101,7 +106,7 @@ def handle_client(client_socket):
         body = headers[-1]
         tweet = json.loads(body)
         tweet['id'] = tweet_id  # assign an ID to the tweet
-        send_request_to_coordinator({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
+        send_request_to_db_server({"type": "SET", "key": f"tweet_{tweet_id}", "value": tweet})
         tweet_id += 1  # increment the tweet ID counter
         # print(headers)
         response = f"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet created!'})}"
@@ -111,7 +116,7 @@ def handle_client(client_socket):
         user_data = json.loads(body)
         username = user_data.get('username')
         if username:
-            send_request_to_coordinator({"type": "SET", "key": f"user_{username}", "value": user_data})
+            send_request_to_db_server({"type": "SET", "key": f"user_{username}", "value": user_data})
             print(cookies)
         response = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{}".format(json.dumps({"status": "Logged in!"}))
         client_socket.sendall(response.encode())
@@ -130,14 +135,14 @@ def handle_client(client_socket):
         body = headers[-1]
         tweet_data = json.loads(body)
         '''print(body);'''
-        tweet = send_request_to_coordinator({"type": "GET", "key": f"tweets"}).get("value")
+        tweet = send_request_to_db_server({"type": "GET", "key": f"tweets"}).get("value")
         tweet = tweet[str(id)]
         print(id)
         print(tweet)
         if tweet:
             tweet['content'] = tweet_data['content']
             tweet['username'] = tweet_data['username']
-            send_request_to_coordinator({"type": "SET", "key": f"tweet_{id}", "value": tweet})
+            send_request_to_db_server({"type": "SET", "key": f"tweet_{id}", "value": tweet})
             response = f"HTTP/1.1 200 OK\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet updated!'})}"
             client_socket.sendall(response.encode())
 
@@ -146,10 +151,10 @@ def handle_client(client_socket):
             client_socket.sendall(response.encode())
     elif method == "DELETE" and path.startswith("/api/tweet/"):
         id = int(path.split('/')[-1])  # get the tweet ID from the path
-        tweet = send_request_to_coordinator({"type": "GET", "key": f"tweets"}).get("value")
+        tweet = send_request_to_db_server({"type": "GET", "key": f"tweets"}).get("value")
         tweet = tweet[str(id)]
         if tweet:
-            send_request_to_coordinator({"type": "DELETE", "key": f"tweet_{id}"})
+            send_request_to_db_server({"type": "DELETE", "key": f"tweet_{id}"})
             response = f"HTTP/1.1 200 OK\nContent-Type: application/json\n\n{json.dumps({'status': 'Tweet updated!'})}"
             client_socket.sendall(response.encode())
 

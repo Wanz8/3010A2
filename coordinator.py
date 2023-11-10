@@ -1,70 +1,232 @@
+import json
+import select
 import socket
-import sys
-import itertools
+import threading
+from abc import ABC, abstractmethod
+import time
 
-class TwoPCCoordinator:
-    def __init__(self, myport, workers):
-        self.myport = myport
-        self.workers = itertools.cycle(workers)  # Round-robin load balancer
-        self.connections = {}
+# Global variables
+ALL_WORKERS_REQUEST = {}
+ALL_FINISH_REQUEST = []
+ALL_TRANSACTION = []
+WORKER_INDEX = 0
 
-    def connect_workers(self):
-        for worker in self.workers:
-            host, port = worker.split(':')
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_address = (host, int(port))
-            print(f'Connecting to {server_address}')
-            sock.connect(server_address)
-            self.connections[worker] = sock
 
-    def run(self):
-        # Create a TCP/IP socket
-        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = ('', self.myport)
-        server_sock.bind(server_address)
-        server_sock.listen(1)
+class Worker:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.worker_socket = None
 
-        print(f'Coordinator is listening for client connections on port {self.myport}')
-        while True:
-            connection, client_address = server_sock.accept()
-            print(f'Connection from {client_address}')
-            try:
-                while True:
-                    data = connection.recv(1024)
-                    if data:
-                        command = data.decode('utf-8')
-                        response = self.process_command(command)
-                        connection.sendall(response.encode('utf-8'))
-                    else:
-                        break
-            finally:
-                connection.close()
+    def connect(self):
+        try:
+            self.worker_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.worker_socket.connect((self.host, self.port))
+            self.worker_socket.setblocking(False)
+            print(f"Connect to worker {self.host}:{self.port}")
+            return True
+        except socket.error:
+            print(f"Fail to connect to worker {self.host}:{self.port}")
+            self.worker_socket = None;
+            return False
 
-    def process_command(self, command):
-        print(f"Processing command: {command}")
-        parts = command.split()
-        cmd_type = parts[0]
-        key = parts[1]
-        if cmd_type in ['SET', 'GET']:
-            # For simplicity, assume SET commands come in as "SET key value"
-            worker_address = next(self.workers)
-            worker_sock = self.connections[worker_address]
-            try:
-                worker_sock.sendall(command.encode('utf-8'))
-                response = worker_sock.recv(1024).decode('utf-8')
-                return response
-            except socket.error as e:
-                return f"Error communicating with worker: {e}"
+    def get_worker_socket(self):
+        return self.worker_socket
+
+
+class TransactionRequest(ABC):
+    def __init__(self, web_server_socket, request, timeout):
+        self.web_server_socket = web_server_socket
+        self.request = request
+        self.timeout = timeout
+        self.start_time = time.time()
+        self.state = 'init'
+        self.fail = False
+
+    def __str__(self):
+        return json.dumps(self.request)
+
+    @abstractmethod
+    def send_to_worker(self, worker_socket):
+        pass
+
+    @abstractmethod
+    def receive_from_worker(self, worker_socket):
+        pass
+
+    @abstractmethod
+    def complete_transaction(self):
+        pass
+
+    def get_web_server_socket(self):
+        return self.web_server_socket
+
+    def set_request_fail(self):
+        self.fail = True
+
+    def is_request_fail(self):
+        return self.fail
+
+    def get_state(self):
+        return self.state
+
+    def is_timed_out(self):
+        return (time.time() - self.start_time) >= self.timeout
+
+    def __str__(self):
+        return str(self.request)
+
+
+class Get(TransactionRequest):
+    def send_to_worker(self, worker_socket):
+        if worker_socket is None:
+            self.set_request_fail()
+            self.state = 'failed'
+            return
         else:
-            return 'UNKNOWN_COMMAND'
+            # worker_socket is now an actual socket object
+            worker_socket.sendall(str(self.request).encode())
+            self.state = 'waiting'
 
-if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print('Usage: python3 coordinator.py [myport] [WorkerHost1:WorkerPort1] [WorkerHost2:WorkerPort2] ...')
-        sys.exit(1)
+    def receive_from_worker(self, worker_socket):
+        # Receive the response from the worker
+        response = worker_socket.recv(1024).decode()
+        if not response:
+            self.set_request_fail()
+            self.state = 'failed'
+        else:
+            self.request['response'] = response
+            self.state = 'received'
 
-    myport = int(sys.argv[1])
-    worker_addresses = sys.argv[2:]
-    coordinator = TwoPCCoordinator(myport, worker_addresses)
-    coordinator.connect_workers()
-    coordinator.run()
+    def complete_transaction(self):
+        # Send the response back to the web server
+        response = self.request.get('response', 'No data')
+        self.web_server_socket.sendall(response.encode())
+
+
+def select_worker():
+    global WORKER_INDEX
+    for _ in range(len(workers)):
+        worker = workers[WORKER_INDEX % len(workers)]
+        WORKER_INDEX += 1
+        if worker.get_worker_socket() is not None:
+            return worker.get_worker_socket()
+    return None
+
+
+class TwoPhaseCommit(TransactionRequest):
+    def __init__(self, web_server_socket, request, timeout, total_workers):
+        super().__init__(web_server_socket, request, timeout)
+        self.total_workers = total_workers
+        self.commit_count = 0
+
+    def send_to_worker(self, worker_socket):
+        try:
+            if worker_socket is None:
+                self.set_request_fail()
+                self.state = 'failed'
+                return
+
+            # Use json.dumps to serialize the request
+            worker_socket.sendall(json.dumps(self.request).encode())
+            self.state = 'waiting'
+        except BrokenPipeError as e:
+            print(f"Error sending data to worker: {e}")
+            self.set_request_fail()
+            self.state = 'failed'
+
+    def receive_from_worker(self, worker_socket):
+        if self.state in ['waiting', 'committing']:
+            ready_to_read, _, _ = select.select([worker_socket], [], [], self.timeout)
+            if ready_to_read:
+                response = worker_socket.recv(1024).decode()
+                # Check if any response is received
+                if response:
+                    if response == 'ACK':
+                        self.commit_count += 1
+                        if self.commit_count == self.total_workers:
+                            self.state = 'committed'
+                    else:
+                        self.set_request_fail()
+                        self.state = 'failed'
+                else:
+                    print("Received empty response from worker.")
+                    self.set_request_fail()
+                    self.state = 'failed'
+            else:
+                print("No data available from worker.")
+                self.set_request_fail()
+                self.state = 'failed'
+
+    def complete_transaction(self):
+        # Send the response to the web server
+        response = 'Commit successful' if self.state == 'committed' else 'Commit failed'
+        self.web_server_socket.sendall(response.encode())
+
+
+def handle_request_from_web_server(web_server_socket):
+    while True:
+        request_data = web_server_socket.recv(1024).decode()
+        if not request_data:
+            break
+
+        try:
+            request = json.loads(request_data)
+
+            # 根据请求类型创建相应的事务对象
+            if request['type'] == 'GET':
+                transaction = Get(web_server_socket, request, timeout=30)
+            elif request['type'] in ['SET', 'PUT', 'DELETE']:
+                transaction = TwoPhaseCommit(web_server_socket, request, timeout=30,
+                                             total_workers=len(ALL_WORKERS_REQUEST))
+
+            # 将事务添加到活动事务列表
+            ALL_TRANSACTION.append(transaction)
+
+            # 选择一个工作器并发送请求
+            worker_socket = select_worker()
+            transaction.send_to_worker(worker_socket)
+
+            # 将请求添加到全局请求字典
+            ALL_WORKERS_REQUEST[worker_socket] = transaction
+
+            # 等待并处理工作器的响应
+            transaction.receive_from_worker(worker_socket)
+
+            # 完成事务，将结果发送回 webServer.py
+            transaction.complete_transaction()
+
+        except json.JSONDecodeError as e:
+            print("Error decoding JSON from web server:", e)
+            break
+
+
+workers = []
+for i in range(6):
+    worker = Worker('localhost', 8000 + i)
+    if worker.connect():
+        workers.append(worker)
+    else:
+        print(f"Warning: Worker {i} could not be connected.")
+
+
+def main():
+    # 假设协调器监听本地主机的某个端口
+    host = 'localhost'
+    port = 8411  # 示例端口号
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((host, port))
+        server_socket.listen()
+
+        print(f"Coordinator listening on {host}:{port}")
+
+        while True:
+            web_server_socket, addr = server_socket.accept()
+            print(f"Connected to web server: {addr}")
+            # 启动一个新线程来处理来自web服务器的请求
+            threading.Thread(target=handle_request_from_web_server, args=(web_server_socket,)).start()
+
+
+if __name__ == "__main__":
+    main()

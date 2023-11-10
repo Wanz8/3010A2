@@ -5,7 +5,7 @@ HOST = ''
 PORT = 7999
 
 tweets = {}  # Dictionary to store tweets
-users = {}   # Dictionary to store user information
+users = {}  # Dictionary to store user information
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind((HOST, PORT))
@@ -46,22 +46,15 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                                 '{"type": "PUT-RESPONSE", "success": false, "message": "Tweet not found" }'.encode())
                 elif request['type'] == 'DELETE':
                     if request['key'].startswith('tweet_'):
-                        tweet_id = request['key'][7:]  # 注意：这里是7因为 "tweet_" 是6个字符加上下划线
+                        tweet_id = request['key'][6:]  # 注意：这里是7因为 "tweet_" 是6个字符加上下划线
                         if tweet_id in tweets:
-                            del tweets[tweet_id]  # 删除推文
+                            print(tweets[tweet_id])
+                            del tweets[tweet_id]
                             conn.sendall('{"type": "DELETE-RESPONSE", "success": true}'.encode())
                         else:
                             conn.sendall(
                                 '{"type": "DELETE-RESPONSE", "success": false, "message": "Tweet not found"}'.encode())
-                    elif request['key'] == 'user_':
-                        username = request['key'][5:]
-                        if username in users:
-                            # 这里仅仅是删除了用户的信息，但实际注销可能需要更复杂的逻辑
-                            del users[username]  # 删除用户会话
-                            conn.sendall('{"type": "DELETE-RESPONSE", "success": true}'.encode())
-                        else:
-                            conn.sendall(
-                                '{"type": "DELETE-RESPONSE", "success": false, "message": "User not found"}'.encode())
+
 
             except json.JSONDecodeError as jde:
                 print("bad json! no cookie!")

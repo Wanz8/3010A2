@@ -64,25 +64,13 @@ function getTweets() {
             for (var i in tweets) {
                 output += '<li>' +
                     tweets[i].content + ' by ' + tweets[i].username +
-                    ' <button onclick="updateTweet(' + tweets[i].id + ')">Update</button>' +  // 这里添加Update按钮
-                    '</li>';
-            }
-            document.getElementById('tweets').innerHTML = output;
-        }
-        xhr.onload = function() {
-        if (this.status == 200) {
-            var tweets = JSON.parse(this.responseText);
-            var output = '';
-            for (var i in tweets) {
-                output += '<li>' +
-                    tweets[i].content + ' by ' + tweets[i].username +
-                    ' <button onclick="deleteTweet(' + tweets[i].id + ')">Delete</button>' + // 添加删除按钮
+                    ' <button onclick="updateTweet(' + tweets[i].id + ')">Update</button>' +
+                    ' <button onclick="deleteTweet(' + tweets[i].id + ')">Delete</button>' +
                     '</li>';
             }
             document.getElementById('tweets').innerHTML = output;
         }
     };
-    }
     xhr.send();
 }
 
@@ -124,9 +112,8 @@ function deleteTweet(tweetId) {
     xhr.open('DELETE', `/api/tweet/${tweetId}`, true);
     xhr.onload = function() {
         if (this.status == 200) {
-            // Handle successful tweet deletion
             console.log(this.responseText);
-            // Update UI accordingly
+            getTweets(); // Refresh the tweets display after successful deletion
         }
     };
     xhr.send();
